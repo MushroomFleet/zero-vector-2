@@ -533,7 +533,10 @@ export const getGraphContext = {
       if (context.connections && context.connections.length > 0) {
         resultText += `**🌟 Key Connections:**\n`;
         context.connections.slice(0, 5).forEach((connection, index) => {
-          resultText += `${index + 1}. ${connection.description || `${connection.entities.join(' ↔ ')}`}\n`;
+          const entitiesText = connection.entities && Array.isArray(connection.entities) 
+            ? connection.entities.join(' ↔ ') 
+            : 'Connection data';
+          resultText += `${index + 1}. ${connection.description || entitiesText}\n`;
           if (connection.strength) {
             resultText += `   • Strength: ${(connection.strength * 100).toFixed(1)}%\n`;
           }
@@ -626,15 +629,27 @@ export const getGraphStats = {
       resultText += `**🌐 Graph Overview:**\n`;
       resultText += `• **Entities:** ${knowledgeGraph.totalEntities}\n`;
       resultText += `• **Relationships:** ${knowledgeGraph.totalRelationships}\n`;
-      resultText += `• **Graph Density:** ${(knowledgeGraph.graphDensity * 100).toFixed(2)}%\n`;
-      resultText += `• **Avg Relations/Entity:** ${knowledgeGraph.averageRelationshipsPerEntity.toFixed(1)}\n`;
+      
+      const graphDensity = typeof knowledgeGraph.graphDensity === 'number' 
+        ? (knowledgeGraph.graphDensity * 100).toFixed(2) 
+        : 'N/A';
+      resultText += `• **Graph Density:** ${graphDensity}%\n`;
+      
+      const avgRelations = typeof knowledgeGraph.averageRelationshipsPerEntity === 'number'
+        ? knowledgeGraph.averageRelationshipsPerEntity.toFixed(1)
+        : 'N/A';
+      resultText += `• **Avg Relations/Entity:** ${avgRelations}\n`;
       resultText += `• **Complexity:** ${knowledgeGraph.graphComplexity}\n\n`;
 
       // Entity type breakdown
       if (knowledgeGraph.entityTypes && knowledgeGraph.entityTypes.length > 0) {
         resultText += `**🏷️ Entity Types:**\n`;
         knowledgeGraph.entityTypes.forEach(type => {
-          resultText += `• ${type.type}: ${type.count} (${type.percentage.toFixed(1)}%)\n`;
+          const percentage = typeof type.percentage === 'number' 
+            ? type.percentage.toFixed(1) 
+            : 'N/A';
+          const typeName = type.type || 'Unknown Entity Type';
+          resultText += `• ${typeName}: ${type.count} (${percentage}%)\n`;
         });
         resultText += '\n';
       }
@@ -643,7 +658,11 @@ export const getGraphStats = {
       if (knowledgeGraph.relationshipTypes && knowledgeGraph.relationshipTypes.length > 0) {
         resultText += `**🔗 Relationship Types:**\n`;
         knowledgeGraph.relationshipTypes.forEach(type => {
-          resultText += `• ${type.type}: ${type.count} (${type.percentage.toFixed(1)}%)\n`;
+          const percentage = typeof type.percentage === 'number' 
+            ? type.percentage.toFixed(1) 
+            : 'N/A';
+          const typeName = type.type || 'Unknown Relationship Type';
+          resultText += `• ${typeName}: ${type.count} (${percentage}%)\n`;
         });
         resultText += '\n';
       }

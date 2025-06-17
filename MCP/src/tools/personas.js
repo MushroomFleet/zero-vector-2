@@ -49,7 +49,7 @@ export const createPersona = {
       },
       embeddingProvider: {
         type: 'string',
-        description: 'Embedding provider (local or openai, default: local)',
+        description: 'Embedding provider (local or openai, default: openai)',
         enum: ['local', 'openai']
       },
       maxMemorySize: {
@@ -113,7 +113,7 @@ export const createPersona = {
       resultText += `🎛️ **Settings:**\n`;
       resultText += `  • Temperature: ${personaData.temperature || validParams.temperature || 0.7}\n`;
       resultText += `  • Max Tokens: ${personaData.maxTokens || validParams.maxTokens || 2048}\n`;
-      resultText += `  • Embedding Provider: ${personaData.embeddingProvider || validParams.embeddingProvider || 'local'}\n`;
+      resultText += `  • Embedding Provider: ${personaData.embeddingProvider || validParams.embeddingProvider || 'openai'}\n`;
       resultText += `  • Max Memory Size: ${personaData.maxMemorySize || 1000}\n`;
       resultText += `  • Memory Decay: ${Math.round((personaData.memoryDecayTime || 7 * 24 * 60 * 60 * 1000) / (24 * 60 * 60 * 1000))} days`;
 

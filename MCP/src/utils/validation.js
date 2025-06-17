@@ -18,7 +18,7 @@ export const personaSchemas = {
     systemPrompt: joi.string().max(5000).optional(),
     temperature: joi.number().min(0).max(2).default(0.7),
     maxTokens: joi.number().integer().min(1).max(8192).default(2048),
-    embeddingProvider: joi.string().valid('openai', 'local').default('local'),
+    embeddingProvider: joi.string().valid('openai', 'local').default('openai'),
     embeddingModel: joi.string().max(100).optional(),
     maxMemorySize: joi.number().integer().min(1).max(10000).default(1000),
     memoryDecayTime: joi.number().integer().min(3600000).default(604800000) // 1 hour to 7 days in ms

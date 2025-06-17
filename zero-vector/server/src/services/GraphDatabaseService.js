@@ -764,8 +764,26 @@ class GraphDatabaseService {
       // Calculate average relationships per entity
       const avgRelationshipsPerEntity = totalNodes > 0 ? totalEdges / totalNodes : 0;
 
+      // Transform entityTypes array to include percentages and proper field names
+      const transformedEntityTypes = stats.entityTypes.map(entityType => ({
+        type: entityType.type,
+        count: entityType.count,
+        percentage: totalNodes > 0 ? parseFloat(((entityType.count / totalNodes) * 100).toFixed(1)) : 0.0,
+        avgConfidence: entityType.avg_confidence ? parseFloat(entityType.avg_confidence.toFixed(3)) : 0.0
+      }));
+
+      // Transform relationshipTypes array to include percentages and proper field names
+      const transformedRelationshipTypes = stats.relationshipTypes.map(relType => ({
+        type: relType.relationship_type, // Transform field name from relationship_type to type
+        count: relType.count,
+        percentage: totalEdges > 0 ? parseFloat(((relType.count / totalEdges) * 100).toFixed(1)) : 0.0,
+        avgStrength: relType.avg_strength ? parseFloat(relType.avg_strength.toFixed(3)) : 0.0
+      }));
+
       const enhancedStats = {
         ...stats,
+        entityTypes: transformedEntityTypes,
+        relationshipTypes: transformedRelationshipTypes,
         graphDensity: parseFloat(density.toFixed(4)),
         averageRelationshipsPerEntity: parseFloat(avgRelationshipsPerEntity.toFixed(2)),
         graphComplexity: this.calculateGraphComplexity(stats),
@@ -776,7 +794,9 @@ class GraphDatabaseService {
         personaId,
         totalEntities: stats.totalEntities,
         totalRelationships: stats.totalRelationships,
-        graphDensity: enhancedStats.graphDensity
+        graphDensity: enhancedStats.graphDensity,
+        entityTypesCount: transformedEntityTypes.length,
+        relationshipTypesCount: transformedRelationshipTypes.length
       });
 
       return enhancedStats;

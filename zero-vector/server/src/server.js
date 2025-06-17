@@ -30,6 +30,7 @@ const createAuthRoutes = require('./routes/auth');
 // Import memory management services
 const EmbeddingService = require('./services/embedding/EmbeddingService');
 const LocalTransformersProvider = require('./services/embedding/LocalTransformersProvider');
+const OpenAIProvider = require('./services/embedding/OpenAIProvider');
 const HybridPersonaMemoryManager = require('./services/HybridPersonaMemoryManager');
 
 /**
@@ -128,7 +129,26 @@ class ZeroVectorServer {
     // Register the local transformer provider
     const localProvider = new LocalTransformersProvider();
     embeddingService.registerProvider('local', localProvider);
-    embeddingService.setDefaultProvider('local');
+    
+    // Register the OpenAI provider if API key is available
+    if (config.embeddings.openaiApiKey) {
+      try {
+        const openaiProvider = new OpenAIProvider({
+          apiKey: config.embeddings.openaiApiKey,
+          model: config.embeddings.model
+        });
+        embeddingService.registerProvider('openai', openaiProvider);
+        logger.info('OpenAI provider registered successfully');
+      } catch (error) {
+        logger.warn('Failed to register OpenAI provider', { error: error.message });
+      }
+    } else {
+      logger.info('OpenAI API key not found, skipping OpenAI provider registration');
+    }
+    
+    // Set default provider based on configuration
+    const defaultProvider = config.embeddings.provider || 'local';
+    embeddingService.setDefaultProvider(defaultProvider);
     
     // Store embedding service for use in other parts of the app
     this.embeddingService = embeddingService;
@@ -175,7 +195,24 @@ class ZeroVectorServer {
       // Register the local transformer provider
       const localProvider = new LocalTransformersProvider();
       embeddingService.registerProvider('local', localProvider);
-      embeddingService.setDefaultProvider('local');
+      
+      // Register the OpenAI provider if API key is available
+      if (config.embeddings.openaiApiKey) {
+        try {
+          const openaiProvider = new OpenAIProvider({
+            apiKey: config.embeddings.openaiApiKey,
+            model: config.embeddings.model
+          });
+          embeddingService.registerProvider('openai', openaiProvider);
+          logger.info('OpenAI provider registered for memory reload');
+        } catch (error) {
+          logger.warn('Failed to register OpenAI provider for reload', { error: error.message });
+        }
+      }
+      
+      // Set default provider based on configuration
+      const defaultProvider = config.embeddings.provider || 'local';
+      embeddingService.setDefaultProvider(defaultProvider);
       
       // Initialize hybrid persona memory manager for reload functionality
       const memoryManager = new HybridPersonaMemoryManager(

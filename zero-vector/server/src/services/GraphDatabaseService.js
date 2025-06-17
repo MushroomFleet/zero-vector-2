@@ -1,4 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const { logger, logError } = require('../utils/logger');
 
 /**
@@ -11,64 +12,169 @@ class GraphDatabaseService {
   }
 
   /**
+   * Generate deterministic entity ID based on persona, name, and type
+   */
+  generateEntityId(personaId, name, type) {
+    const normalizedName = this.normalizeEntityName(name);
+    const content = `${personaId}:${normalizedName}:${type}`;
+    return crypto.createHash('sha256').update(content).digest('hex').substring(0, 32);
+  }
+
+  /**
+   * Generate deterministic relationship ID
+   */
+  generateRelationshipId(personaId, sourceEntityId, targetEntityId, relationshipType) {
+    const content = `${personaId}:${sourceEntityId}:${targetEntityId}:${relationshipType}`;
+    return crypto.createHash('sha256').update(content).digest('hex').substring(0, 32);
+  }
+
+  /**
+   * Normalize entity name for consistent lookups
+   */
+  normalizeEntityName(name) {
+    return name.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  }
+
+  /**
+   * Generate content hash for entity
+   */
+  generateContentHash(name, type, properties = {}) {
+    const content = JSON.stringify({ name, type, properties }, Object.keys({ name, type, properties }).sort());
+    return crypto.createHash('md5').update(content).digest('hex');
+  }
+
+  /**
+   * Validate entity exists before creating relationships
+   */
+  async validateEntityExists(entityId) {
+    try {
+      const entity = await this.database.getEntityById(entityId);
+      return !!entity;
+    } catch (error) {
+      logger.warn('Failed to validate entity existence', { entityId, error: error.message });
+      return false;
+    }
+  }
+
+  /**
    * Create or update an entity in the knowledge graph
    */
   async createEntity(entityData) {
     try {
-      // Check if entity already exists with same name and type for this persona
-      const existingEntity = await this.findEntityByNameAndType(
+      // Generate deterministic entity ID
+      const entityId = entityData.id || this.generateEntityId(
         entityData.personaId,
         entityData.name,
         entityData.type
       );
 
+      // Normalize entity name for consistent lookups
+      const normalizedName = this.normalizeEntityName(entityData.name);
+      const contentHash = this.generateContentHash(entityData.name, entityData.type, entityData.properties);
+
+      // Check if entity already exists with same ID
+      const existingEntity = await this.database.getEntityById(entityId);
+
       if (existingEntity) {
         // Update existing entity with higher confidence if provided
-        if (entityData.confidence > existingEntity.confidence) {
+        if ((entityData.confidence || 1.0) > existingEntity.confidence) {
           await this.updateEntity(existingEntity.id, {
-            confidence: entityData.confidence,
+            confidence: entityData.confidence || 1.0,
             vectorId: entityData.vectorId || existingEntity.vector_id,
             properties: {
               ...existingEntity.properties,
               ...entityData.properties
-            }
+            },
+            contentHash: contentHash
           });
           
           logger.info('Updated existing entity with higher confidence', {
             entityId: existingEntity.id,
             name: entityData.name,
             oldConfidence: existingEntity.confidence,
-            newConfidence: entityData.confidence
+            newConfidence: entityData.confidence || 1.0
           });
           
           return existingEntity.id;
         } else {
           // Entity exists with equal or higher confidence, return existing ID
+          logger.debug('Entity already exists with sufficient confidence', {
+            entityId: existingEntity.id,
+            name: entityData.name,
+            confidence: existingEntity.confidence
+          });
           return existingEntity.id;
         }
       }
 
-      // Create new entity
-      const entityId = entityData.id || uuidv4();
-      await this.database.insertEntity({
-        id: entityId,
-        personaId: entityData.personaId,
-        vectorId: entityData.vectorId,
-        type: entityData.type,
-        name: entityData.name,
-        properties: entityData.properties || {},
-        confidence: entityData.confidence || 1.0
-      });
+      try {
+        // Create new entity with enhanced data
+        await this.database.insertEntity({
+          id: entityId,
+          personaId: entityData.personaId,
+          vectorId: entityData.vectorId,
+          type: entityData.type,
+          name: entityData.name,
+          normalizedName: normalizedName,
+          properties: entityData.properties || {},
+          confidence: entityData.confidence || 1.0,
+          contentHash: contentHash
+        });
 
-      logger.info('Created new entity', {
-        entityId,
-        personaId: entityData.personaId,
-        type: entityData.type,
-        name: entityData.name,
-        confidence: entityData.confidence
-      });
+        logger.info('Created new entity', {
+          entityId,
+          personaId: entityData.personaId,
+          type: entityData.type,
+          name: entityData.name,
+          normalizedName: normalizedName,
+          confidence: entityData.confidence || 1.0
+        });
 
-      return entityId;
+        return entityId;
+
+      } catch (insertError) {
+        // Check if this is a UNIQUE constraint violation
+        if (insertError.message && insertError.message.includes('UNIQUE constraint failed')) {
+          // Entity was created by another process, find and return the existing entity
+          logger.warn('UNIQUE constraint violation, finding existing entity', {
+            personaId: entityData.personaId,
+            name: entityData.name,
+            type: entityData.type,
+            error: insertError.message
+          });
+
+          // Try to find existing entity by normalized name and type
+          const existingEntities = await this.database.getEntitiesByPersona(entityData.personaId, {
+            limit: 100
+          });
+
+          const matchingEntity = existingEntities.find(entity => 
+            entity.type === entityData.type && 
+            entity.normalized_name === normalizedName
+          );
+
+          if (matchingEntity) {
+            logger.info('Found existing entity after UNIQUE constraint violation', {
+              entityId: matchingEntity.id,
+              name: entityData.name,
+              type: entityData.type
+            });
+            return matchingEntity.id;
+          } else {
+            // If we can't find the entity, something is wrong
+            logger.error('Could not find entity after UNIQUE constraint violation', {
+              personaId: entityData.personaId,
+              name: entityData.name,
+              type: entityData.type,
+              normalizedName: normalizedName
+            });
+            throw insertError;
+          }
+        } else {
+          // Some other error, re-throw it
+          throw insertError;
+        }
+      }
 
     } catch (error) {
       logError(error, {
@@ -88,59 +194,151 @@ class GraphDatabaseService {
    */
   async createRelationship(relationshipData) {
     try {
-      // Check if relationship already exists
-      const existingRelationship = await this.findRelationship(
+      // Validate that both entities exist before creating relationship
+      const sourceExists = await this.validateEntityExists(relationshipData.sourceEntityId);
+      const targetExists = await this.validateEntityExists(relationshipData.targetEntityId);
+
+      if (!sourceExists) {
+        const error = new Error(`Source entity not found: ${relationshipData.sourceEntityId}`);
+        logError(error, {
+          operation: 'createRelationship',
+          sourceEntityId: relationshipData.sourceEntityId,
+          targetEntityId: relationshipData.targetEntityId,
+          relationshipType: relationshipData.relationshipType
+        });
+        throw error;
+      }
+
+      if (!targetExists) {
+        const error = new Error(`Target entity not found: ${relationshipData.targetEntityId}`);
+        logError(error, {
+          operation: 'createRelationship',
+          sourceEntityId: relationshipData.sourceEntityId,
+          targetEntityId: relationshipData.targetEntityId,
+          relationshipType: relationshipData.relationshipType
+        });
+        throw error;
+      }
+
+      // Enhanced duplicate detection: Check using the actual UNIQUE constraint fields
+      const existingRelationshipByFields = await this.findExistingRelationship(
+        relationshipData.personaId,
         relationshipData.sourceEntityId,
         relationshipData.targetEntityId,
         relationshipData.relationshipType
       );
 
-      if (existingRelationship) {
+      if (existingRelationshipByFields) {
         // Update relationship strength using weighted average
-        const newStrength = (existingRelationship.strength + relationshipData.strength) / 2;
+        const newStrength = Math.min(1.0, (existingRelationshipByFields.strength + (relationshipData.strength || 1.0)) / 2);
         
-        await this.database.updateRelationship(existingRelationship.id, {
+        await this.database.updateRelationship(existingRelationshipByFields.id, {
           strength: newStrength,
-          context: relationshipData.context || existingRelationship.context,
+          context: relationshipData.context || existingRelationshipByFields.context,
           properties: {
-            ...existingRelationship.properties,
+            ...existingRelationshipByFields.properties,
             ...relationshipData.properties,
-            updateCount: (existingRelationship.properties.updateCount || 0) + 1
+            updateCount: (existingRelationshipByFields.properties.updateCount || 0) + 1,
+            lastUpdated: Date.now()
           }
         });
 
-        logger.info('Updated existing relationship', {
-          relationshipId: existingRelationship.id,
-          oldStrength: existingRelationship.strength,
+        logger.debug('Updated existing relationship found by constraint fields', {
+          relationshipId: existingRelationshipByFields.id,
+          personaId: relationshipData.personaId,
+          sourceEntityId: relationshipData.sourceEntityId,
+          targetEntityId: relationshipData.targetEntityId,
+          relationshipType: relationshipData.relationshipType,
+          oldStrength: existingRelationshipByFields.strength,
           newStrength: newStrength
         });
 
-        return existingRelationship.id;
+        return existingRelationshipByFields.id;
       }
 
-      // Create new relationship
-      const relationshipId = relationshipData.id || uuidv4();
-      await this.database.insertRelationship({
-        id: relationshipId,
-        personaId: relationshipData.personaId,
-        sourceEntityId: relationshipData.sourceEntityId,
-        targetEntityId: relationshipData.targetEntityId,
-        relationshipType: relationshipData.relationshipType,
-        strength: relationshipData.strength || 1.0,
-        context: relationshipData.context,
-        properties: relationshipData.properties || {}
-      });
+      // Generate deterministic relationship ID
+      const relationshipId = relationshipData.id || this.generateRelationshipId(
+        relationshipData.personaId,
+        relationshipData.sourceEntityId,
+        relationshipData.targetEntityId,
+        relationshipData.relationshipType
+      );
 
-      logger.info('Created new relationship', {
-        relationshipId,
-        personaId: relationshipData.personaId,
-        sourceEntityId: relationshipData.sourceEntityId,
-        targetEntityId: relationshipData.targetEntityId,
-        relationshipType: relationshipData.relationshipType,
-        strength: relationshipData.strength
-      });
+      // Generate content hash for relationship
+      const contentHash = this.generateContentHash(
+        `${relationshipData.sourceEntityId}:${relationshipData.targetEntityId}`,
+        relationshipData.relationshipType,
+        relationshipData.properties
+      );
 
-      return relationshipId;
+      try {
+        // Create new relationship with validation passed
+        await this.database.insertRelationship({
+          id: relationshipId,
+          personaId: relationshipData.personaId,
+          sourceEntityId: relationshipData.sourceEntityId,
+          targetEntityId: relationshipData.targetEntityId,
+          relationshipType: relationshipData.relationshipType,
+          strength: relationshipData.strength || 1.0,
+          context: relationshipData.context,
+          properties: relationshipData.properties || {},
+          contentHash: contentHash
+        });
+
+        logger.info('Created new relationship', {
+          relationshipId,
+          personaId: relationshipData.personaId,
+          sourceEntityId: relationshipData.sourceEntityId,
+          targetEntityId: relationshipData.targetEntityId,
+          relationshipType: relationshipData.relationshipType,
+          strength: relationshipData.strength || 1.0
+        });
+
+        return relationshipId;
+
+      } catch (insertError) {
+        // Handle UNIQUE constraint violations as a safety net
+        if (insertError.message && insertError.message.includes('UNIQUE constraint failed')) {
+          logger.warn('UNIQUE constraint violation, finding existing relationship', {
+            personaId: relationshipData.personaId,
+            sourceEntityId: relationshipData.sourceEntityId,
+            targetEntityId: relationshipData.targetEntityId,
+            relationshipType: relationshipData.relationshipType,
+            error: insertError.message
+          });
+
+          // Try to find the existing relationship again
+          const existingRelationship = await this.findExistingRelationship(
+            relationshipData.personaId,
+            relationshipData.sourceEntityId,
+            relationshipData.targetEntityId,
+            relationshipData.relationshipType
+          );
+
+          if (existingRelationship) {
+            logger.info('Found existing relationship after UNIQUE constraint violation', {
+              relationshipId: existingRelationship.id,
+              personaId: relationshipData.personaId,
+              sourceEntityId: relationshipData.sourceEntityId,
+              targetEntityId: relationshipData.targetEntityId,
+              relationshipType: relationshipData.relationshipType
+            });
+            return existingRelationship.id;
+          } else {
+            // If we still can't find it, something is seriously wrong
+            logger.error('Could not find relationship after UNIQUE constraint violation', {
+              personaId: relationshipData.personaId,
+              sourceEntityId: relationshipData.sourceEntityId,
+              targetEntityId: relationshipData.targetEntityId,
+              relationshipType: relationshipData.relationshipType
+            });
+            throw insertError;
+          }
+        } else {
+          // Some other error, re-throw it
+          throw insertError;
+        }
+      }
 
     } catch (error) {
       logError(error, {
@@ -163,21 +361,37 @@ class GraphDatabaseService {
     try {
       const processedEntities = [];
       const processedRelationships = [];
+      const entityIdMapping = new Map(); // Map original random IDs to new deterministic IDs
 
-      // Process entities first
+      // Process entities first and build ID mapping
       for (const entity of entities) {
         try {
-          const entityId = await this.createEntity(entity);
+          const originalId = entity.id;
+          const newEntityId = await this.createEntity(entity);
+          
+          // Track the mapping from original ID to new deterministic ID
+          entityIdMapping.set(originalId, newEntityId);
+          
           processedEntities.push({
             ...entity,
-            id: entityId,
+            id: newEntityId,
+            originalId: originalId,
             status: 'processed'
           });
+          
+          logger.debug('Entity processed with ID mapping', {
+            originalId,
+            newId: newEntityId,
+            entityName: entity.name,
+            entityType: entity.type
+          });
+          
         } catch (error) {
           logError(error, {
             operation: 'processEntity',
             entityName: entity.name,
-            entityType: entity.type
+            entityType: entity.type,
+            originalId: entity.id
           });
           processedEntities.push({
             ...entity,
@@ -187,20 +401,63 @@ class GraphDatabaseService {
         }
       }
 
-      // Process relationships after entities are created
-      for (const relationship of relationships) {
-        try {
-          const relationshipId = await this.createRelationship(relationship);
-          processedRelationships.push({
-            ...relationship,
-            id: relationshipId,
-            status: 'processed'
+      // Update relationship entity IDs to use new deterministic IDs
+      const updatedRelationships = relationships.map(relationship => {
+        const originalSourceId = relationship.sourceEntityId;
+        const originalTargetId = relationship.targetEntityId;
+        const newSourceId = entityIdMapping.get(originalSourceId);
+        const newTargetId = entityIdMapping.get(originalTargetId);
+
+        if (!newSourceId || !newTargetId) {
+          logger.warn('Missing entity ID mapping for relationship', {
+            originalSourceId,
+            originalTargetId,
+            newSourceId,
+            newTargetId,
+            relationshipType: relationship.relationshipType
           });
+        }
+
+        return {
+          ...relationship,
+          sourceEntityId: newSourceId || originalSourceId,
+          targetEntityId: newTargetId || originalTargetId,
+          originalSourceId,
+          originalTargetId
+        };
+      });
+
+      // Process relationships with updated entity IDs
+      for (const relationship of updatedRelationships) {
+        try {
+          // Only process if both entities were successfully created
+          if (entityIdMapping.has(relationship.originalSourceId) && 
+              entityIdMapping.has(relationship.originalTargetId)) {
+            
+            const relationshipId = await this.createRelationship(relationship);
+            processedRelationships.push({
+              ...relationship,
+              id: relationshipId,
+              status: 'processed'
+            });
+            
+            logger.debug('Relationship processed with updated IDs', {
+              relationshipId,
+              sourceEntityId: relationship.sourceEntityId,
+              targetEntityId: relationship.targetEntityId,
+              relationshipType: relationship.relationshipType
+            });
+            
+          } else {
+            throw new Error(`Missing source or target entity for relationship: ${relationship.originalSourceId} -> ${relationship.originalTargetId}`);
+          }
         } catch (error) {
           logError(error, {
             operation: 'processRelationship',
             sourceEntityId: relationship.sourceEntityId,
             targetEntityId: relationship.targetEntityId,
+            originalSourceId: relationship.originalSourceId,
+            originalTargetId: relationship.originalTargetId,
             relationshipType: relationship.relationshipType
           });
           processedRelationships.push({
@@ -215,15 +472,20 @@ class GraphDatabaseService {
         entitiesProcessed: processedEntities.filter(e => e.status === 'processed').length,
         entitiesFailed: processedEntities.filter(e => e.status === 'failed').length,
         relationshipsProcessed: processedRelationships.filter(r => r.status === 'processed').length,
-        relationshipsFailed: processedRelationships.filter(r => r.status === 'failed').length
+        relationshipsFailed: processedRelationships.filter(r => r.status === 'failed').length,
+        entityIdMappings: entityIdMapping.size
       };
 
-      logger.info('Graph processing completed', summary);
+      logger.info('Graph processing completed with ID mapping', {
+        ...summary,
+        entityIdMappingsCreated: entityIdMapping.size
+      });
 
       return {
         entities: processedEntities,
         relationships: processedRelationships,
-        summary
+        summary,
+        entityIdMapping: Object.fromEntries(entityIdMapping) // Include mapping in response for debugging
       };
 
     } catch (error) {
@@ -559,7 +821,42 @@ class GraphDatabaseService {
   }
 
   /**
-   * Helper method to find existing relationship
+   * Find existing relationship using UNIQUE constraint fields
+   */
+  async findExistingRelationship(personaId, sourceEntityId, targetEntityId, relationshipType) {
+    try {
+      const relationship = await this.database.findRelationshipByFields(
+        personaId,
+        sourceEntityId,
+        targetEntityId,
+        relationshipType
+      );
+      
+      if (relationship) {
+        logger.debug('Found existing relationship by constraint fields', {
+          relationshipId: relationship.id,
+          personaId,
+          sourceEntityId,
+          targetEntityId,
+          relationshipType
+        });
+      }
+      
+      return relationship;
+    } catch (error) {
+      logError(error, {
+        operation: 'findExistingRelationship',
+        personaId,
+        sourceEntityId,
+        targetEntityId,
+        relationshipType
+      });
+      return null;
+    }
+  }
+
+  /**
+   * Helper method to find existing relationship (legacy method)
    */
   async findRelationship(sourceEntityId, targetEntityId, relationshipType) {
     try {

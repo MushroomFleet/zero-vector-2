@@ -173,8 +173,10 @@ class DatabaseRepository {
         vector_id TEXT,
         type TEXT NOT NULL, -- PERSON, CONCEPT, EVENT, OBJECT, PLACE
         name TEXT NOT NULL,
+        normalized_name TEXT,
         properties TEXT, -- JSON metadata
         confidence REAL DEFAULT 1.0,
+        content_hash TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (persona_id) REFERENCES personas (id) ON DELETE CASCADE,
@@ -191,8 +193,10 @@ class DatabaseRepository {
         strength REAL DEFAULT 1.0,
         context TEXT,
         properties TEXT, -- JSON metadata
+        content_hash TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL,
+        UNIQUE(persona_id, source_entity_id, target_entity_id, relationship_type),
         FOREIGN KEY (persona_id) REFERENCES personas (id) ON DELETE CASCADE,
         FOREIGN KEY (source_entity_id) REFERENCES entities (id) ON DELETE CASCADE,
         FOREIGN KEY (target_entity_id) REFERENCES entities (id) ON DELETE CASCADE
@@ -664,25 +668,93 @@ class DatabaseRepository {
    * Vector Metadata Methods
    */
 
+  // Find vector metadata by ID
+  async findVectorMetadataById(id) {
+    const stmt = this.db.prepare('SELECT * FROM vector_metadata WHERE id = ?');
+    const result = stmt.get(id);
+    
+    if (result) {
+      result.tags = JSON.parse(result.tags);
+      result.customMetadata = JSON.parse(result.custom_metadata);
+    }
+    
+    return result;
+  }
+
   // Insert vector metadata
   async insertVectorMetadata(metadata) {
-    const stmt = this.db.prepare(`
-      INSERT INTO vector_metadata (id, dimensions, persona_id, content_type, source, tags, custom_metadata, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    try {
+      // First check if vector metadata with this ID already exists
+      const existing = await this.findVectorMetadataById(metadata.id);
+      if (existing) {
+        logger.warn('Vector metadata with this ID already exists, returning existing record', {
+          service: 'zero-vector-server',
+          version: '1.0.0',
+          vectorId: metadata.id,
+          personaId: metadata.personaId
+        });
+        return existing;
+      }
 
-    const now = Date.now();
-    return stmt.run(
-      metadata.id,
-      metadata.dimensions,
-      metadata.personaId,
-      metadata.contentType,
-      metadata.source,
-      JSON.stringify(metadata.tags || []),
-      JSON.stringify(metadata.customMetadata || {}),
-      now,
-      now
-    );
+      const stmt = this.db.prepare(`
+        INSERT INTO vector_metadata (id, dimensions, persona_id, content_type, source, tags, custom_metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const now = Date.now();
+      const result = stmt.run(
+        metadata.id,
+        metadata.dimensions,
+        metadata.personaId,
+        metadata.contentType,
+        metadata.source,
+        JSON.stringify(metadata.tags || []),
+        JSON.stringify(metadata.customMetadata || {}),
+        now,
+        now
+      );
+
+      logger.info('Vector metadata inserted successfully', {
+        service: 'zero-vector-server',
+        version: '1.0.0',
+        vectorId: metadata.id,
+        personaId: metadata.personaId,
+        dimensions: metadata.dimensions
+      });
+
+      return result;
+    } catch (error) {
+      if (error.code === 'SQLITE_CONSTRAINT_UNIQUE' && error.message.includes('vector_metadata.id')) {
+        logger.warn('UNIQUE constraint violation, finding existing vector metadata', {
+          service: 'zero-vector-server',
+          version: '1.0.0',
+          vectorId: metadata.id,
+          personaId: metadata.personaId,
+          error: error.message
+        });
+
+        // Find and return the existing record
+        const existing = await this.findVectorMetadataById(metadata.id);
+        if (existing) {
+          logger.info('Found existing vector metadata after UNIQUE constraint violation', {
+            service: 'zero-vector-server',
+            version: '1.0.0',
+            vectorId: existing.id,
+            personaId: existing.persona_id
+          });
+          return existing;
+        }
+      }
+
+      logger.error('Failed to insert vector metadata', {
+        service: 'zero-vector-server',
+        version: '1.0.0',
+        vectorId: metadata.id,
+        personaId: metadata.personaId,
+        error: error.message
+      });
+      throw error;
+    }
   }
 
   // Get vector metadata
@@ -946,8 +1018,8 @@ class DatabaseRepository {
   // Insert entity
   async insertEntity(entityData) {
     const stmt = this.db.prepare(`
-      INSERT INTO entities (id, persona_id, vector_id, type, name, properties, confidence, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (id, persona_id, vector_id, type, name, normalized_name, properties, confidence, content_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const now = Date.now();
@@ -957,8 +1029,10 @@ class DatabaseRepository {
       entityData.vectorId || null,
       entityData.type,
       entityData.name,
+      entityData.normalizedName || entityData.name.toLowerCase(),
       JSON.stringify(entityData.properties || {}),
       entityData.confidence || 1.0,
+      entityData.contentHash || null,
       now,
       now
     );
@@ -1063,8 +1137,8 @@ class DatabaseRepository {
   // Insert relationship
   async insertRelationship(relationshipData) {
     const stmt = this.db.prepare(`
-      INSERT INTO relationships (id, persona_id, source_entity_id, target_entity_id, relationship_type, strength, context, properties, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO relationships (id, persona_id, source_entity_id, target_entity_id, relationship_type, strength, context, properties, content_hash, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const now = Date.now();
@@ -1077,6 +1151,7 @@ class DatabaseRepository {
       relationshipData.strength || 1.0,
       relationshipData.context || null,
       JSON.stringify(relationshipData.properties || {}),
+      relationshipData.contentHash || null,
       now,
       now
     );
@@ -1086,6 +1161,21 @@ class DatabaseRepository {
   async getRelationshipById(id) {
     const stmt = this.db.prepare('SELECT * FROM relationships WHERE id = ?');
     const result = stmt.get(id);
+    
+    if (result && result.properties) {
+      result.properties = JSON.parse(result.properties);
+    }
+    
+    return result;
+  }
+
+  // Find relationship by UNIQUE constraint fields
+  async findRelationshipByFields(personaId, sourceEntityId, targetEntityId, relationshipType) {
+    const stmt = this.db.prepare(`
+      SELECT * FROM relationships 
+      WHERE persona_id = ? AND source_entity_id = ? AND target_entity_id = ? AND relationship_type = ?
+    `);
+    const result = stmt.get(personaId, sourceEntityId, targetEntityId, relationshipType);
     
     if (result && result.properties) {
       result.properties = JSON.parse(result.properties);

@@ -51,6 +51,11 @@ class HybridVectorStore extends IndexedVectorStore {
       // First, add vector using parent implementation
       const vectorResult = super.addVector(vector, id, metadata);
       
+      // Create vector metadata record in database for foreign key references
+      if (this.database) {
+        await this.createVectorMetadata(id, vector, metadata);
+      }
+      
       // Process graph associations if enabled and content is available
       if (this.graphEnabled && metadata.originalContent && metadata.personaId) {
         await this.processGraphAssociations(id, metadata);
@@ -60,7 +65,8 @@ class HybridVectorStore extends IndexedVectorStore {
       logger.debug('Hybrid vector addition completed', {
         id,
         duration,
-        graphProcessed: this.graphEnabled && metadata.originalContent && metadata.personaId
+        graphProcessed: this.graphEnabled && metadata.originalContent && metadata.personaId,
+        metadataCreated: !!this.database
       });
       
       return vectorResult;
@@ -139,6 +145,62 @@ class HybridVectorStore extends IndexedVectorStore {
       });
       // Fall back to regular vector search if hybrid search fails
       return await this.search(queryVector, vectorSearchOptions);
+    }
+  }
+
+  /**
+   * Create vector metadata record in database
+   */
+  async createVectorMetadata(vectorId, vector, metadata) {
+    try {
+      // Check if vector metadata already exists
+      const existingMetadata = await this.database.getVectorMetadata(vectorId);
+      if (existingMetadata) {
+        logger.debug('Vector metadata already exists, skipping creation', {
+          vectorId,
+          personaId: metadata.personaId
+        });
+        return;
+      }
+      
+      // Prepare metadata for database insertion
+      const vectorMetadata = {
+        id: vectorId,
+        dimensions: vector.length,
+        personaId: metadata.personaId || null,
+        contentType: metadata.type || metadata.contentType || 'memory',
+        source: metadata.source || 'user_input',
+        tags: metadata.tags || [],
+        customMetadata: {
+          importance: metadata.importance,
+          context: metadata.context,
+          originalContent: metadata.originalContent ? metadata.originalContent.substring(0, 1000) : null, // Truncate for storage
+          memoryType: metadata.type,
+          ...metadata.customMetadata
+        }
+      };
+      
+      // Insert vector metadata into database
+      await this.database.insertVectorMetadata(vectorMetadata);
+      
+      logger.debug('Vector metadata created successfully', {
+        vectorId,
+        personaId: vectorMetadata.personaId,
+        dimensions: vectorMetadata.dimensions,
+        contentType: vectorMetadata.contentType
+      });
+      
+    } catch (error) {
+      // Log error but don't throw - this shouldn't break vector storage
+      logError(error, {
+        operation: 'createVectorMetadata',
+        vectorId,
+        personaId: metadata.personaId
+      });
+      logger.warn('Failed to create vector metadata, continuing without database record', {
+        vectorId,
+        error: error.message
+      });
     }
   }
 

@@ -7,167 +7,56 @@ import apiClient from '../apiClient.js';
 import { validateInput } from '../utils/validation.js';
 import { createLogger } from '../utils/logger.js';
 import { formatTimestamp } from '../utils/dateHelpers.js';
+import joi from 'joi';
 
 const logger = createLogger('GraphTools');
 
+// Common validation patterns
+const patterns = {
+  uuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+};
+
 /**
- * Graph validation schemas
+ * Graph validation schemas using Joi
  */
 const graphSchemas = {
-  exploreKnowledgeGraph: {
-    type: 'object',
-    properties: {
-      personaId: {
-        type: 'string',
-        minLength: 1,
-        description: 'UUID of the persona'
-      },
-      query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1000,
-        description: 'Search query for entities'
-      },
-      limit: {
-        type: 'number',
-        minimum: 1,
-        maximum: 100,
-        description: 'Maximum number of entities to return'
-      },
-      entityTypes: {
-        type: 'array',
-        items: {
-          type: 'string',
-          enum: ['PERSON', 'CONCEPT', 'EVENT', 'OBJECT', 'PLACE']
-        },
-        description: 'Filter by entity types'
-      },
-      minConfidence: {
-        type: 'number',
-        minimum: 0,
-        maximum: 1,
-        description: 'Minimum confidence threshold'
-      },
-      includeRelated: {
-        type: 'boolean',
-        description: 'Include related entities'
-      },
-      maxDepth: {
-        type: 'number',
-        minimum: 1,
-        maximum: 5,
-        description: 'Maximum relationship depth'
-      }
-    },
-    required: ['personaId', 'query']
-  },
+  exploreKnowledgeGraph: joi.object({
+    personaId: joi.string().pattern(patterns.uuid).required(),
+    query: joi.string().min(1).max(1000).required(),
+    limit: joi.number().integer().min(1).max(100).default(10),
+    entityTypes: joi.array().items(
+      joi.string().valid('PERSON', 'CONCEPT', 'EVENT', 'OBJECT', 'PLACE')
+    ).optional(),
+    minConfidence: joi.number().min(0).max(1).default(0.0),
+    includeRelated: joi.boolean().default(false),
+    maxDepth: joi.number().integer().min(1).max(5).default(2)
+  }),
 
-  hybridMemorySearch: {
-    type: 'object',
-    properties: {
-      personaId: {
-        type: 'string',
-        minLength: 1,
-        description: 'UUID of the persona'
-      },
-      query: {
-        type: 'string',
-        minLength: 1,
-        maxLength: 1000,
-        description: 'Search query'
-      },
-      limit: {
-        type: 'number',
-        minimum: 1,
-        maximum: 50,
-        description: 'Maximum number of memories to return'
-      },
-      threshold: {
-        type: 'number',
-        minimum: 0,
-        maximum: 1,
-        description: 'Minimum similarity threshold'
-      },
-      memoryTypes: {
-        type: 'array',
-        items: {
-          type: 'string',
-          enum: ['conversation', 'fact', 'preference', 'context', 'system']
-        },
-        description: 'Filter by memory types'
-      },
-      includeContext: {
-        type: 'boolean',
-        description: 'Include context information'
-      },
-      useGraphExpansion: {
-        type: 'boolean',
-        description: 'Enable graph-based expansion'
-      },
-      graphDepth: {
-        type: 'number',
-        minimum: 1,
-        maximum: 5,
-        description: 'Graph traversal depth'
-      },
-      graphWeight: {
-        type: 'number',
-        minimum: 0,
-        maximum: 1,
-        description: 'Weight for graph-based results'
-      }
-    },
-    required: ['personaId', 'query']
-  },
+  hybridMemorySearch: joi.object({
+    personaId: joi.string().pattern(patterns.uuid).required(),
+    query: joi.string().min(1).max(1000).required(),
+    limit: joi.number().integer().min(1).max(50).default(5),
+    threshold: joi.number().min(0).max(1).default(0.7),
+    memoryTypes: joi.array().items(
+      joi.string().valid('conversation', 'fact', 'preference', 'context', 'system')
+    ).optional(),
+    includeContext: joi.boolean().default(true),
+    useGraphExpansion: joi.boolean().default(true),
+    graphDepth: joi.number().integer().min(1).max(5).default(2),
+    graphWeight: joi.number().min(0).max(1).default(0.3)
+  }),
 
-  getGraphContext: {
-    type: 'object',
-    properties: {
-      personaId: {
-        type: 'string',
-        minLength: 1,
-        description: 'UUID of the persona'
-      },
-      entityIds: {
-        type: 'array',
-        items: {
-          type: 'string'
-        },
-        minItems: 1,
-        maxItems: 50,
-        description: 'Array of entity IDs'
-      },
-      includeRelationships: {
-        type: 'boolean',
-        description: 'Include relationship information'
-      },
-      maxRelationships: {
-        type: 'number',
-        minimum: 1,
-        maximum: 100,
-        description: 'Maximum relationships to return'
-      },
-      relationshipDepth: {
-        type: 'number',
-        minimum: 1,
-        maximum: 3,
-        description: 'Relationship traversal depth'
-      }
-    },
-    required: ['personaId', 'entityIds']
-  },
+  getGraphContext: joi.object({
+    personaId: joi.string().pattern(patterns.uuid).required(),
+    entityIds: joi.array().items(joi.string()).min(1).max(50).required(),
+    includeRelationships: joi.boolean().default(true),
+    maxRelationships: joi.number().integer().min(1).max(100).default(20),
+    relationshipDepth: joi.number().integer().min(1).max(3).default(1)
+  }),
 
-  getGraphStats: {
-    type: 'object',
-    properties: {
-      personaId: {
-        type: 'string',
-        minLength: 1,
-        description: 'UUID of the persona'
-      }
-    },
-    required: ['personaId']
-  }
+  getGraphStats: joi.object({
+    personaId: joi.string().pattern(patterns.uuid).required()
+  })
 };
 
 /**

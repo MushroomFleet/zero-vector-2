@@ -70,7 +70,9 @@ export const memorySchemas = {
     memoryTypes: joi.array().items(
       joi.string().valid('conversation', 'fact', 'preference', 'context', 'system')
     ).optional(),
-    include_context: joi.boolean().default(false)
+    include_context: joi.boolean().default(false),
+    content_preview_length: joi.number().integer().min(0).max(5000).default(0),
+    show_full_content: joi.boolean().default(true)
   }),
 
   addConversation: joi.object({
@@ -85,7 +87,9 @@ export const memorySchemas = {
     personaId: joi.string().pattern(patterns.uuid).required(),
     conversationId: joi.string().pattern(patterns.uuid).required(),
     limit: joi.number().integer().min(1).max(1000).default(100),
-    include_context: joi.boolean().default(true)
+    include_context: joi.boolean().default(true),
+    content_preview_length: joi.number().integer().min(0).max(5000).default(0),
+    show_full_content: joi.boolean().default(true)
   }),
 
   cleanupPersonaMemories: joi.object({

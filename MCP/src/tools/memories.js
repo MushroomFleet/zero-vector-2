@@ -89,7 +89,17 @@ export const addMemory = {
       let resultText = `✅ **Memory added successfully!**\n\n`;
       resultText += `🆔 **Memory ID:** ${memoryData.id}\n`;
       resultText += `👤 **Persona ID:** ${validParams.personaId}\n`;
-      resultText += `📝 **Content:** ${validParams.content.substring(0, 100)}${validParams.content.length > 100 ? '...' : ''}\n`;
+      
+      // Show more content in confirmation - up to 300 characters or full content if shorter
+      const contentPreview = validParams.content.length > 300 
+        ? validParams.content.substring(0, 300) + '...' 
+        : validParams.content;
+      resultText += `📝 **Content:** ${contentPreview}\n`;
+      
+      if (validParams.content.length > 300) {
+        resultText += `📏 **Full length:** ${validParams.content.length} characters\n`;
+      }
+      
       resultText += `🏷️ **Type:** ${validParams.type}\n`;
       resultText += `⭐ **Importance:** ${validParams.importance}\n`;
       if (validParams.context && Object.keys(validParams.context).length > 0) {
@@ -153,6 +163,14 @@ export const searchPersonaMemories = {
       include_context: {
         type: 'boolean',
         description: 'Include context information in results (default: false)'
+      },
+      content_preview_length: {
+        type: 'number',
+        description: 'Length of content preview (1-5000, 0 for full content, default: 0)'
+      },
+      show_full_content: {
+        type: 'boolean',
+        description: 'Show complete content instead of preview (default: true)'
       }
     },
     required: ['personaId', 'query']
@@ -236,8 +254,26 @@ export const searchPersonaMemories = {
                        (memory.metadata?.customMetadata?.originalContent);
         
         if (content && typeof content === 'string' && content.trim().length > 0) {
-          const preview = content.length > 150 ? content.substring(0, 150) + '...' : content;
-          resultText += `• **Content:** ${preview}\n`;
+          // Use configurable truncation settings - defaults changed to show full content
+          const previewLength = searchParams.content_preview_length !== undefined ? searchParams.content_preview_length : 0;
+          const showFullContent = searchParams.show_full_content !== undefined ? searchParams.show_full_content : true;
+
+          let displayContent;
+          
+          if (showFullContent || previewLength === 0) {
+            displayContent = content;
+          } else {
+            displayContent = content.length > previewLength 
+              ? content.substring(0, previewLength) + '...' 
+              : content;
+          }
+          
+          resultText += `• **Content:** ${displayContent}\n`;
+          
+          // Show content stats if truncated
+          if (!showFullContent && previewLength > 0 && content.length > previewLength) {
+            resultText += `• **Content Length:** ${content.length} characters (showing ${previewLength})\n`;
+          }
         } else {
           // Debug info to help identify the issue
           const metadataKeys = memory.metadata ? Object.keys(memory.metadata) : ['no metadata'];
@@ -275,6 +311,19 @@ export const searchPersonaMemories = {
         
         resultText += '\n';
       });
+
+      // Add summary notification about content options - updated for new defaults
+      const effectivePreviewLength = searchParams.content_preview_length !== undefined ? searchParams.content_preview_length : 0;
+      const effectiveShowFullContent = searchParams.show_full_content !== undefined ? searchParams.show_full_content : true;
+      
+      const hasLongContent = memories.some(m => {
+        const content = m.metadata?.originalContent || m.metadata?.content || m.content;
+        return content && content.length > 200; // Only show note if content is reasonably long
+      });
+
+      if (hasLongContent && !effectiveShowFullContent && effectivePreviewLength > 0) {
+        resultText += `\n💡 **Note:** Some memories have longer content. Use \`show_full_content: true\` or \`content_preview_length: 0\` for complete content, or use the \`get_full_memory\` tool for individual memories.\n`;
+      }
 
       return {
         content: [{
@@ -379,8 +428,23 @@ export const addConversation = {
       resultText += `🤖 **Assistant Memory:** ${assistantMemory.id}\n\n`;
       
       resultText += `📝 **Exchange Preview:**\n`;
-      resultText += `**User:** ${conversationData.userMessage.substring(0, 100)}${conversationData.userMessage.length > 100 ? '...' : ''}\n`;
-      resultText += `**Assistant:** ${conversationData.assistantResponse.substring(0, 100)}${conversationData.assistantResponse.length > 100 ? '...' : ''}\n\n`;
+      
+      // Show more content in conversation preview - up to 200 characters each
+      const userPreview = conversationData.userMessage.length > 200 
+        ? conversationData.userMessage.substring(0, 200) + '...' 
+        : conversationData.userMessage;
+      const assistantPreview = conversationData.assistantResponse.length > 200 
+        ? conversationData.assistantResponse.substring(0, 200) + '...' 
+        : conversationData.assistantResponse;
+      
+      resultText += `**User:** ${userPreview}\n`;
+      resultText += `**Assistant:** ${assistantPreview}\n`;
+      
+      // Show character counts if truncated
+      if (conversationData.userMessage.length > 200 || conversationData.assistantResponse.length > 200) {
+        resultText += `*(User: ${conversationData.userMessage.length} chars, Assistant: ${conversationData.assistantResponse.length} chars)*\n`;
+      }
+      resultText += '\n';
       
       resultText += `📅 **Created:** ${formatTimestamp(userMemory.createdAt, 'iso')}`;
 
@@ -428,6 +492,14 @@ export const getConversationHistory = {
       include_context: {
         type: 'boolean',
         description: 'Include context information (default: true)'
+      },
+      content_preview_length: {
+        type: 'number',
+        description: 'Length of content preview (1-5000, 0 for full content, default: 0)'
+      },
+      show_full_content: {
+        type: 'boolean',
+        description: 'Show complete content instead of preview (default: true)'
       }
     },
     required: ['personaId', 'conversationId']
@@ -498,18 +570,33 @@ export const getConversationHistory = {
       // Sort by timestamp to ensure chronological order
       const sortedHistory = history.sort((a, b) => a.timestamp - b.timestamp);
 
+      // Apply content display settings - defaults to full content
+      const previewLength = queryParams.content_preview_length !== undefined ? queryParams.content_preview_length : 0;
+      const showFullContent = queryParams.show_full_content !== undefined ? queryParams.show_full_content : true;
+
       sortedHistory.forEach((message) => {
         const speaker = message.speaker === 'user' ? '🗣️ **User**' : '🤖 **Assistant**';
         const timestamp = formatTimestamp(message.timestamp, 'time');
         
         resultText += `${speaker} (${timestamp})\n`;
         
-        // Show content preview
+        // Show content with configurable truncation
         const content = message.content;
-        if (content.length > 200) {
-          resultText += `${content.substring(0, 200)}...\n`;
+        let displayContent;
+        
+        if (showFullContent || previewLength === 0) {
+          displayContent = content;
         } else {
-          resultText += `${content}\n`;
+          displayContent = content.length > previewLength 
+            ? content.substring(0, previewLength) + '...' 
+            : content;
+        }
+        
+        resultText += `${displayContent}\n`;
+        
+        // Show content stats if truncated
+        if (!showFullContent && previewLength > 0 && content.length > previewLength) {
+          resultText += `*(${content.length} characters total)*\n`;
         }
         
         if (queryParams.include_context && message.context && Object.keys(message.context).length > 0) {
@@ -666,11 +753,111 @@ export const cleanupPersonaMemories = {
   }
 };
 
+/**
+ * Get full memory content by ID
+ */
+export const getFullMemory = {
+  name: 'get_full_memory',
+  description: 'Retrieve the complete content of a specific memory by ID',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      personaId: {
+        type: 'string',
+        description: 'UUID of the persona who owns the memory'
+      },
+      memoryId: {
+        type: 'string',
+        description: 'UUID of the memory to retrieve'
+      },
+      include_metadata: {
+        type: 'boolean',
+        description: 'Include full metadata (default: true)'
+      }
+    },
+    required: ['personaId', 'memoryId']
+  },
+
+  async handler(params) {
+    try {
+      const { personaId, memoryId, include_metadata = true } = params;
+
+      // Get memory via API
+      const result = await apiClient.get(`/api/personas/${personaId}/memories/${memoryId}`, {
+        include_metadata
+      });
+
+      if (!result.success) {
+        return {
+          content: [{
+            type: 'text',
+            text: `❌ Failed to retrieve memory: ${result.message}`
+          }],
+          isError: true
+        };
+      }
+
+      const memory = result.data;
+      
+      let resultText = `📄 **Full Memory Content**\n\n`;
+      resultText += `🆔 **Memory ID:** ${memoryId}\n`;
+      resultText += `👤 **Persona ID:** ${personaId}\n`;
+      resultText += `🏷️ **Type:** ${memory.metadata?.memoryType || 'unknown'}\n`;
+      resultText += `⭐ **Importance:** ${memory.metadata?.importance || 'unknown'}\n`;
+      
+      if (memory.metadata?.timestamp) {
+        resultText += `📅 **Created:** ${formatTimestamp(memory.metadata.timestamp, 'iso')}\n`;
+      }
+      
+      resultText += `\n📝 **Complete Content:**\n\n`;
+      
+      // Get full content from all possible locations
+      const fullContent = memory.metadata?.originalContent || 
+                         memory.metadata?.content || 
+                         memory.content || 
+                         memory.metadata?.customMetadata?.originalContent;
+      
+      if (fullContent) {
+        resultText += `${fullContent}\n`;
+      } else {
+        resultText += `❌ Content not found. Available fields: ${Object.keys(memory.metadata || {}).join(', ')}\n`;
+      }
+
+      if (include_metadata && memory.metadata) {
+        resultText += `\n🔍 **Metadata:**\n`;
+        Object.entries(memory.metadata).forEach(([key, value]) => {
+          if (key !== 'originalContent' && key !== 'content') {
+            resultText += `• **${key}:** ${JSON.stringify(value).substring(0, 100)}\n`;
+          }
+        });
+      }
+
+      return {
+        content: [{
+          type: 'text',
+          text: resultText
+        }]
+      };
+
+    } catch (error) {
+      logger.error('Unexpected error in get_full_memory', { error: error.message });
+      return {
+        content: [{
+          type: 'text',
+          text: `❌ Unexpected error: ${error.message}`
+        }],
+        isError: true
+      };
+    }
+  }
+};
+
 // Export all memory tools
 export const memoryTools = [
   addMemory,
   searchPersonaMemories,
   addConversation,
   getConversationHistory,
-  cleanupPersonaMemories
+  cleanupPersonaMemories,
+  getFullMemory
 ];

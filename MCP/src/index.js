@@ -18,10 +18,10 @@ import { graphTools } from './tools/graph.js';
 
 const logger = createLogger('MCPServer');
 
-// Combine all tools (17 total - enhanced with graph capabilities)
+// Combine all tools (18 total - enhanced with graph capabilities + full memory retrieval)
 const allTools = [
   ...personaTools,    // 5 tools
-  ...memoryTools,     // 5 tools  
+  ...memoryTools,     // 6 tools (includes new get_full_memory)
   ...utilityTools,    // 3 tools
   ...graphTools       // 4 tools (v2.0 graph capabilities)
 ];

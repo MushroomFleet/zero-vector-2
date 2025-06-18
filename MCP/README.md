@@ -1,6 +1,6 @@
 # Zero-Vector MCP Server v2.0
 
-A comprehensive Model Context Protocol (MCP) server for Zero-Vector's hybrid vector-graph persona and memory management system. This v2.0 implementation combines semantic vector search with knowledge graph capabilities for enhanced AI memory and relationship understanding.
+A comprehensive Model Context Protocol (MCP) server for Zero-Vector's hybrid vector-graph persona and memory management system. This v2.0 implementation combines semantic vector search with knowledge graph capabilities for enhanced AI memory and relationship understanding, now featuring 18 specialized tools including advanced content access controls.
 
 ## Features
 
@@ -11,9 +11,10 @@ A comprehensive Model Context Protocol (MCP) server for Zero-Vector's hybrid vec
 - **update_persona** - Update persona configuration and settings
 - **delete_persona** - Delete personas and associated memories/entities
 
-### Memory Management (5 tools)
+### Memory Management (6 tools)
 - **add_memory** - Add memories with automatic entity extraction and graph building
-- **search_persona_memories** - Semantic search through persona memories
+- **search_persona_memories** - Semantic search through persona memories with configurable content display
+- **get_full_memory** - Retrieve complete content of specific memories without truncation
 - **add_conversation** - Add user/assistant conversation exchanges with entity linking
 - **get_conversation_history** - Retrieve complete conversation history with context
 - **cleanup_persona_memories** - Clean up old or low-importance memories and entities
@@ -177,6 +178,50 @@ Add to your Cline MCP configuration:
   "entityIds": ["entity-uuid-1", "entity-uuid-2"],
   "includeRelationships": true,
   "maxDepth": 2
+}
+```
+
+### Advanced Content Access (New in v2.0)
+
+#### Get Full Memory Content
+```javascript
+{
+  "personaId": "uuid-here",
+  "memoryId": "memory-uuid-from-search",
+  "include_metadata": true
+}
+```
+
+#### Search with Custom Content Preview
+```javascript
+{
+  "personaId": "uuid-here",
+  "query": "white hat tales",
+  "limit": 5,
+  "content_preview_length": 500,  // Show 500 characters instead of default 150
+  "threshold": 0.3
+}
+```
+
+#### Search with Full Content Display
+```javascript
+{
+  "personaId": "uuid-here",
+  "query": "complete stories",
+  "limit": 3,
+  "show_full_content": true,  // Display complete content without truncation
+  "threshold": 0.4
+}
+```
+
+#### Search with No Content Limits
+```javascript
+{
+  "personaId": "uuid-here",
+  "query": "narrative content",
+  "limit": 10,
+  "content_preview_length": 0,  // 0 = no truncation
+  "threshold": 0.3
 }
 ```
 

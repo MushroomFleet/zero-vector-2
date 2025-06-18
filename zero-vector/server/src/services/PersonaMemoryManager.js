@@ -901,6 +901,61 @@ class PersonaMemoryManager {
   }
 
   /**
+   * Get a specific memory by ID
+   */
+  async getMemoryById(memoryId, personaId) {
+    try {
+      const metadata = await this.database.getVectorMetadata(memoryId);
+      
+      if (!metadata || metadata.persona_id !== personaId) {
+        return null;
+      }
+
+      // Get vector data (for vector-specific metadata if needed)
+      const vector = await this.vectorStore.getVector(memoryId);
+      
+      if (!vector) {
+        return null;
+      }
+
+      // FIXED: Use the full content from database metadata
+      // This ensures we get the complete, untruncated content
+      const fullContent = metadata.customMetadata?.originalContent || 
+                         vector.metadata?.originalContent || 
+                         vector.content;
+
+      logger.debug('Retrieved memory by ID', {
+        memoryId,
+        personaId,
+        hasDbMetadata: !!metadata.customMetadata,
+        hasOriginalContent: !!metadata.customMetadata?.originalContent,
+        contentLength: fullContent ? fullContent.length : 0,
+        vectorContentLength: vector.content ? vector.content.length : 0
+      });
+
+      return {
+        id: memoryId,
+        content: fullContent, // Now gets the full content from database
+        metadata: {
+          ...vector.metadata,
+          ...metadata.customMetadata,
+          originalContent: fullContent // Ensure it's directly accessible
+        },
+        similarity: 1.0, // Perfect match since we're getting by ID
+        timestamp: metadata.created_at
+      };
+
+    } catch (error) {
+      logger.error('Failed to get memory by ID', {
+        memoryId,
+        personaId,
+        error: error.message
+      });
+      return null;
+    }
+  }
+
+  /**
    * Remove a specific memory
    */
   async removeMemory(memoryId) {

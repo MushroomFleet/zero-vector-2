@@ -414,6 +414,56 @@ router.post('/:id/memories', asyncHandler(async (req, res) => {
 }));
 
 /**
+ * Get specific memory by ID
+ * GET /api/personas/:id/memories/:memoryId
+ */
+router.get('/:id/memories/:memoryId', asyncHandler(async (req, res) => {
+  const { id, memoryId } = req.params;
+  const { include_metadata = true } = req.query;
+
+  try {
+    // Verify persona ownership
+    await req.personaMemoryManager.getPersona(id, req.user.id);
+
+    // Get memory from vector store
+    const memory = await req.personaMemoryManager.getMemoryById(memoryId, id);
+
+    if (!memory) {
+      res.status(404).json({
+        status: 'error',
+        error: 'Memory not found'
+      });
+      return;
+    }
+
+    let responseData = memory;
+
+    if (include_metadata === 'false') {
+      // Strip metadata if requested
+      responseData = {
+        id: memory.id,
+        content: memory.metadata?.originalContent || memory.content
+      };
+    }
+
+    res.json({
+      status: 'success',
+      data: responseData
+    });
+
+  } catch (error) {
+    if (error.message.includes('not found') || error.message.includes('Access denied')) {
+      res.status(404).json({
+        status: 'error',
+        error: 'Persona or memory not found'
+      });
+      return;
+    }
+    throw error;
+  }
+}));
+
+/**
  * Search persona memories
  * POST /api/personas/:id/memories/search
  */

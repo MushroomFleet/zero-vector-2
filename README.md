@@ -10,7 +10,7 @@ Zero-Vector MCP v2.0 provides a production-ready hybrid vector-graph solution fo
 
 - **Hybrid Vector-Graph Engine** - Combines semantic search with knowledge graph traversal
 - **AI Persona Memory with Relationships** - Context-aware memory with entity extraction and graph building
-- **Enhanced MCP Integration** - 17 specialized tools including graph exploration and hybrid search
+- **Enhanced MCP Integration** - 18 specialized tools including graph exploration, hybrid search, and advanced content access
 - **Knowledge Graph Intelligence** - Automatic entity recognition and relationship mapping
 - **Production-Ready Architecture** - Feature flags, comprehensive monitoring, and zero-downtime deployment
 
@@ -133,7 +133,7 @@ The core vector database server providing:
 **Location:** [`MCP/README.md`](MCP/README.md)
 
 The Model Context Protocol interface providing:
-- 17 specialized tools for persona, memory, and graph management
+- 18 specialized tools for persona, memory, and graph management
 - Hybrid vector-graph search capabilities
 - Seamless integration with AI development tools
 - Comprehensive error handling and validation
@@ -156,9 +156,9 @@ The Model Context Protocol interface providing:
 - **Conversation History**: Complete conversation tracking with entity linking
 - **Memory Cleanup**: Automated cleanup of old memories and orphaned graph entities
 
-### MCP Integration Tools (17 total)
+### MCP Integration Tools (18 total)
 - **Persona Tools (5)**: `create_persona`, `list_personas`, `get_persona`, `update_persona`, `delete_persona`
-- **Memory Tools (5)**: `add_memory`, `search_persona_memories`, `add_conversation`, `get_conversation_history`, `cleanup_persona_memories`
+- **Memory Tools (6)**: `add_memory`, `search_persona_memories`, `get_full_memory`, `add_conversation`, `get_conversation_history`, `cleanup_persona_memories`
 - **Graph Tools (4)**: `explore_knowledge_graph`, `hybrid_memory_search`, `get_graph_context`, `get_graph_stats`
 - **Utility Tools (3)**: `get_system_health`, `get_persona_stats`, `test_connection`
 
@@ -205,6 +205,31 @@ const graphEntities = await mcpClient.exploreKnowledgeGraph({
   query: "John Smith",
   includeRelationships: true,
   entityTypes: ["PERSON", "ORGANIZATION"]
+});
+
+// Get full content of specific memories without truncation
+const fullMemory = await mcpClient.getFullMemory({
+  personaId: persona.id,
+  memoryId: "memory-uuid-from-search",
+  include_metadata: true
+});
+
+// Search with configurable content display
+const searchWithFullContent = await mcpClient.searchPersonaMemories({
+  personaId: persona.id,
+  query: "white hat tales",
+  limit: 5,
+  show_full_content: true,  // No truncation
+  threshold: 0.3
+});
+
+// Search with custom preview length
+const searchWithCustomPreview = await mcpClient.searchPersonaMemories({
+  personaId: persona.id,
+  query: "project details",
+  limit: 10,
+  content_preview_length: 500,  // Show 500 characters instead of default 150
+  threshold: 0.4
 });
 ```
 

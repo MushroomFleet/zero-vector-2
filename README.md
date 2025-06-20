@@ -2,7 +2,7 @@
 
 A complete AI persona memory management system combining a high-performance hybrid vector-graph database server with a Model Context Protocol (MCP) interface for advanced AI memory and relationship understanding.
 
-🔗 **GitHub Repository:** [https://github.com/MushroomFleet/zero-vector-MCP](https://github.com/MushroomFleet/zero-vector-MCP)
+🔗 **Vector only v1.0 version:** [https://github.com/MushroomFleet/zero-vector-MCP](https://github.com/MushroomFleet/zero-vector-MCP)
 
 ## 🎯 Overview
 
